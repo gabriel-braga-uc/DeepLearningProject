@@ -1,0 +1,416 @@
+% =====================================================================
+% Projeto 1: Reconhecimento de Objetos Usando YOLO
+% MS960/MT862: Topicos em Aprendizado de Maquina (Deep Learning)
+% Prof. Joao Florindo: IMECC/UNICAMP, 2026/1
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+% --- Codificacao e idioma ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+
+% --- Tipografia ---
+\usepackage{lmodern}
+\usepackage{microtype}
+
+% --- Layout ---
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{1.25em}
+
+% --- Matematica ---
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+
+% --- Graficos e tabelas ---
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{float}
+
+% --- Codigo ---
+\usepackage{listings}
+\usepackage{xcolor}
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{codecmt}{RGB}{0,128,0}
+\definecolor{codekw}{RGB}{0,0,180}
+\definecolor{codestr}{RGB}{160,32,32}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  commentstyle=\color{codecmt}\itshape,
+  keywordstyle=\color{codekw}\bfseries,
+  stringstyle=\color{codestr},
+  language=Python,
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{black!20},
+  numbers=left,
+  numberstyle=\tiny\color{black!50},
+  numbersep=8pt,
+  xleftmargin=2em,
+  inputencoding=utf8,
+  extendedchars=true,
+  literate={á}{{\'a}}1 {ã}{{\~a}}1 {â}{{\^a}}1 {à}{{\`a}}1
+           {é}{{\'e}}1 {ê}{{\^e}}1
+           {í}{{\'i}}1
+           {ó}{{\'o}}1 {ô}{{\^o}}1 {õ}{{\~o}}1
+           {ú}{{\'u}}1
+           {ç}{{\c{c}}}1
+}
+
+% --- Hyperlinks (carregar por ultimo) ---
+\usepackage[colorlinks=true,
+            linkcolor=blue!50!black,
+            citecolor=blue!50!black,
+            urlcolor=blue!50!black]{hyperref}
+
+% --- Cabecalho ---
+\title{\textbf{Reconhecimento de Objetos Usando YOLO} \\
+       \large Projeto 1 \\
+       \large MS960/MT862: Tópicos em Aprendizado de Máquina (Deep Learning)}
+\author{
+  Integrante 1 (RA: \dots) \\
+  Integrante 2 (RA: \dots) \\
+  Integrante 3 (RA: \dots) \\
+  Integrante 4 (RA: \dots) \\[0.5em]
+  \small Prof. João Florindo \\
+  \small IMECC/UNICAMP
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent Este relatório descreve a implementação e a análise do algoritmo YOLOv3 para detecção de objetos em imagens, desenvolvida em Python com o framework PyTorch. As funções de Intersecção sobre União (IoU) e de Supressão Não Maximal (NMS) foram construídas manualmente, seguindo as orientações do enunciado e a errata fornecida pelo professor. Discutimos a arquitetura DarkNet-53 com três cabeças de detecção, apresentamos os resultados obtidos sobre a base de imagens fornecida e analisamos criticamente o impacto dos limiares de NMS e IoU no número e na qualidade das detecções.
+\end{abstract}
+
+% =====================================================================
+\section{Introdução}
+% =====================================================================
+
+A detecção de objetos é uma das tarefas fundamentais da visão computacional. Diferentemente da classificação, que apenas atribui um rótulo a uma imagem inteira, a detecção exige duas respostas simultâneas: identificar \emph{o que} está presente e \emph{onde} está, em geral por meio de uma caixa delimitadora (\textit{bounding box}) e de um nível de confiança associado a uma classe. Essa combinação de tarefas faz da detecção um problema mais difícil e, ao mesmo tempo, com aplicações práticas mais ricas \cite{lin2014coco,zou2023survey}.
+
+A relevância da detecção de objetos cresceu de forma marcante na última década, impulsionada pelo avanço das redes neurais profundas e pela disponibilidade de bases anotadas de larga escala. Dentre as aplicações mais comuns estão veículos autônomos, em que a localização precisa de pedestres, ciclistas e outros automóveis é crítica para a tomada de decisão; sistemas de vigilância, que dependem de rastreamento robusto em tempo real; varejo automatizado, em que prateleiras e produtos precisam ser identificados sem intervenção humana; e diagnóstico assistido em imagens médicas, no qual lesões e estruturas anatômicas são localizadas para apoiar o trabalho clínico. Em todos esses cenários, requisitos de latência e precisão coexistem e, com frequência, são conflitantes.
+
+Os métodos modernos de detecção podem ser organizados em três grandes famílias. A primeira é a dos detectores em \emph{dois estágios}, representada pelas variantes da R-CNN \cite{girshick2014rcnn,ren2015fasterrcnn}: primeiro propõem-se regiões candidatas e em seguida cada região é classificada e refinada. Esses métodos costumam atingir alta precisão, ao custo de uma latência maior. A segunda família é a dos detectores em \emph{estágio único}, na qual se enquadram o SSD \cite{liu2016ssd} e a família YOLO \cite{redmon2016yolo,redmon2018yolov3}, que tratam a detecção como um único problema de regressão sobre uma grade de células e oferecem boa precisão com latência muito baixa. A terceira família, mais recente, é a dos detectores baseados em Transformers, com destaque para o DETR \cite{carion2020detr}, que reformula a detecção como um problema de atribuição entre conjuntos sem necessidade de NMS explícito.
+
+Dentro deste contexto, o YOLO se destaca pela proposta original de Redmon et al. \cite{redmon2016yolo}: realizar uma única passagem pela imagem (\textit{You Only Look Once}) e produzir, em paralelo, todas as caixas e classes. Essa estratégia permite operação em tempo real e, ao mesmo tempo, mantém precisão competitiva. Neste projeto adotamos a versão YOLOv3 \cite{redmon2018yolov3}, por ser a versão correspondente aos pesos pré-treinados disponibilizados no enunciado e por já incorporar dois ingredientes que se tornaram padrão no campo: detecção em múltiplas escalas via \emph{Feature Pyramid Network} (FPN) \cite{lin2017fpn} e backbone profundo com conexões residuais \cite{he2016resnet}.
+
+% =====================================================================
+\section{Algoritmo YOLO}
+% =====================================================================
+
+\subsection{Visão geral e intuição}
+
+O YOLO formula a detecção como um problema de regressão. Em vez de propor regiões e depois classificá-las, ele divide a imagem em uma grade $S \times S$ e atribui a cada célula a responsabilidade pelos objetos cujo centro caia dentro dela. A cada célula são associados $B$ \emph{anchor boxes}, ou seja, caixas de referência com largura e altura fixadas previamente. A rede aprende a corrigir essas caixas de referência por meio de pequenos deslocamentos, em vez de prever as coordenadas absolutas do zero \cite{redmon2017yolov2}. Essa decisão simplifica a otimização e estabiliza o treinamento.
+
+A saída da rede para cada \textit{anchor} de cada célula contém:
+\begin{itemize}\itemsep0pt
+  \item dois deslocamentos $(t_x, t_y)$ que, depois de uma sigmoide, posicionam o centro da caixa dentro da célula;
+  \item dois fatores $(t_w, t_h)$ que escalam exponencialmente as dimensões da \textit{anchor};
+  \item uma confiança $t_o$, conhecida como \emph{objectness}, que indica se há de fato um objeto naquela posição;
+  \item um vetor de probabilidades por classe.
+\end{itemize}
+
+Formalmente, dados a célula $(c_x, c_y)$ e a \textit{anchor} de tamanho $(p_w, p_h)$, a caixa final é dada por
+\begin{align}
+  b_x &= \sigma(t_x) + c_x, \\
+  b_y &= \sigma(t_y) + c_y, \\
+  b_w &= p_w \cdot e^{t_w}, \\
+  b_h &= p_h \cdot e^{t_h},
+\end{align}
+em coordenadas da grade. A sigmoide em $t_x$ e $t_y$ garante que o centro permaneça dentro da célula, e a exponencial em $t_w$ e $t_h$ assegura dimensões positivas.
+
+\subsection{Arquitetura do YOLOv3}
+
+A versão YOLOv3 é composta por dois grandes blocos. O primeiro é o \emph{backbone}, chamado DarkNet-53, formado por uma sequência de convoluções $3{\times}3$ e $1{\times}1$ intercaladas por blocos residuais. Esse backbone tem 53 camadas convolucionais e foi inspirado tanto na DarkNet-19 do YOLOv2 quanto na ResNet, combinando profundidade com a estabilidade dos atalhos residuais. O segundo bloco é a \emph{cabeça} de detecção, que utiliza uma estrutura de pirâmide de características (FPN) para emitir predições em três escalas diferentes:
+\begin{itemize}\itemsep0pt
+  \item escala $13 \times 13$: resolução mais grosseira, dedicada a objetos grandes;
+  \item escala $26 \times 26$: resolução intermediária;
+  \item escala $52 \times 52$: resolução fina, dedicada a objetos pequenos.
+\end{itemize}
+
+Cada escala recebe três \emph{anchors} dimensionadas por \emph{k-means} sobre o conjunto COCO \cite{lin2014coco}, totalizando nove âncoras. Os mapas de saída têm $3 \times (5 + C)$ canais, onde $C = 80$ é o número de classes do COCO; o fator 3 corresponde às três \emph{anchors} por célula e o 5 corresponde a $(t_x, t_y, t_w, t_h, t_o)$.
+
+A rede de detecção total tem cerca de 62 milhões de parâmetros. Em nossa implementação, o resumo automático produzido pelo notebook conta 75 camadas \texttt{Conv2d}, 72 camadas \texttt{BatchNorm2d} e 23 blocos residuais, valores compatíveis com o que é descrito na literatura.
+
+\subsection{Função de perda e treinamento}
+
+Embora neste projeto utilizemos os pesos já treinados sobre o COCO, vale resumir a função de perda do YOLOv3 para fins de discussão. Ela é uma soma ponderada de três termos: regressão das coordenadas das caixas (com erro quadrático sobre $t_x, t_y, t_w, t_h$), entropia binária para a \emph{objectness} e entropia binária independente por classe (em vez de softmax, o que permite atribuir múltiplos rótulos quando a hierarquia de classes assim o permite) \cite{redmon2018yolov3}. Apenas as âncoras com maior IoU em relação a cada objeto rotulado contribuem para a regressão das coordenadas, evitando ambiguidades.
+
+\subsection{Pós-processamento: IoU e NMS}
+
+Após a passagem direta, cada uma das três escalas produz um conjunto denso de caixas candidatas. Antes de exibir os resultados, dois passos de pós-processamento são essenciais: filtragem por confiança e Supressão Não Maximal (NMS).
+
+A IoU entre duas caixas $A$ e $B$ é definida como
+\begin{equation}
+\mathrm{IoU}(A,B) = \frac{|A \cap B|}{|A \cup B|},
+\end{equation}
+e mede o grau de sobreposição entre regiões. Em nossa implementação manual, a IoU é calculada de forma vetorizada entre uma caixa de referência e um conjunto de caixas, determinando os cantos da intersecção, calculando a área correspondente e dividindo pela área da união.
+
+O NMS, por sua vez, evita que múltiplas caixas redundantes sejam exibidas para um mesmo objeto. Conforme observado pelo professor na errata enviada à turma, a operação deve ser realizada de forma independente por classe, pois objetos de classes diferentes podem legitimamente se sobrepor (um cachorro montado em um cavalo, por exemplo). O algoritmo, em pseudocódigo, é o seguinte:
+
+\begin{enumerate}\itemsep0pt
+  \item Para cada classe presente entre as caixas filtradas:
+  \begin{enumerate}\itemsep0pt
+    \item Ordene as caixas dessa classe por confiança decrescente.
+    \item Tome a caixa de maior confiança e mantenha-a.
+    \item Calcule a IoU dessa caixa contra todas as demais da mesma classe.
+    \item Descarte aquelas com IoU acima de um limiar $\tau$ (caixas redundantes).
+    \item Repita o processo com as caixas restantes até esvaziar a lista.
+  \end{enumerate}
+  \item Junte os índices mantidos por todas as classes.
+\end{enumerate}
+
+A escolha de $\tau$ é um \emph{trade-off}: valores baixos eliminam caixas legítimas que estejam próximas (objetos vizinhos), enquanto valores altos preservam duplicatas. Da mesma forma, o limiar de confiança $s_{\min}$ aplicado antes do NMS controla quão permissivo é o detector: valores altos descartam predições inseguras, mas podem perder objetos verdadeiros; valores baixos aumentam a cobertura ao custo de mais falsos positivos.
+
+% =====================================================================
+\section{Implementação}
+% =====================================================================
+
+A implementação completa está distribuída em dois arquivos principais: o notebook \texttt{YOLO\_Projeto1.ipynb}, que contém a definição da arquitetura, o pipeline de detecção e os experimentos; e o arquivo \texttt{utils.py}, que isola as funções manuais de IoU e NMS, conforme solicitado.
+
+\subsection{Pipeline de inferência}
+
+A entrada do modelo tem tamanho fixo $416 \times 416$. Para preservar a razão de aspecto da imagem original (ponto importante para evitar distorções nas caixas previstas), aplicamos uma técnica chamada \emph{letterbox}: a imagem é reescalada de modo que o lado maior ocupe os 416 pixels e o lado menor é completado com cinza neutro. Após a passagem pela rede, as coordenadas previstas em $[0, 1]$ são revertidas para o sistema da imagem original por meio da função \texttt{reverter\_escala\_caixas}.
+
+A decodificação das saídas (\texttt{decode\_yolo}) converte os tensores brutos em caixas $[y_1, x_1, y_2, x_2]$, scores e índices de classe. Em seguida, aplicamos um filtro por \emph{score} mínimo e a função \texttt{manual\_nms} para obter as caixas finais.
+
+\subsection{Funções manuais de IoU e NMS}
+
+A Figura~\ref{fig:codigo} mostra um trecho de \texttt{utils.py}, com a chamada de \texttt{manual\_nms} já adaptada para receber o vetor de classes, conforme a errata.
+
+\begin{figure}[H]
+\centering
+\begin{lstlisting}[language=Python]
+def manual_nms(boxes, scores, classes, iou_threshold=0.45):
+    keep_global = []
+    classes_unicas = torch.unique(classes)
+
+    for cls in classes_unicas:
+        mask_cls   = (classes == cls)
+        idx_cls    = torch.nonzero(mask_cls, as_tuple=False).flatten()
+        boxes_cls  = boxes[mask_cls]
+        scores_cls = scores[mask_cls]
+
+        ordem = torch.argsort(scores_cls, descending=True)
+        keep_local = []
+        while ordem.numel() > 0:
+            i = ordem[0].item()
+            keep_local.append(idx_cls[i].item())
+            if ordem.numel() == 1:
+                break
+            ious     = manual_iou(boxes_cls[i], boxes_cls[ordem[1:]])
+            mantidas = torch.nonzero(ious <= iou_threshold,
+                                     as_tuple=False).flatten()
+            ordem    = ordem[1:][mantidas]
+        keep_global.extend(keep_local)
+    # ... reordenacao final por score ...
+\end{lstlisting}
+\caption{Trecho de \texttt{utils.py}: NMS manual com processamento independente por classe.}
+\label{fig:codigo}
+\end{figure}
+
+% =====================================================================
+\section{Resultados}
+% =====================================================================
+
+Aplicamos o detector com os limiares padrão $s_{\min} = 0{,}5$ e $\tau_{\mathrm{IoU}} = 0{,}45$ a todas as imagens da base. A Tabela~\ref{tab:resultados} resume o número de objetos detectados por imagem e os respectivos rótulos. A Figura~\ref{fig:exemplos} apresenta exemplos visuais.
+
+\begin{table}[H]
+\centering
+\caption{Detecções por imagem com os limiares padrão ($s_{\min}=0{,}5$ e $\tau_{\mathrm{IoU}}=0{,}45$).}
+\label{tab:resultados}
+\small
+\begin{tabularx}{\linewidth}{l c X}
+\toprule
+\textbf{Imagem} & \textbf{Objetos} & \textbf{Classes detectadas} \\
+\midrule
+\texttt{cat.jpg}        & 1  & cat \\
+\texttt{city\_scene.jpg} & 15 & person ($\times 6$), car ($\times 3$), traffic light ($\times 3$), truck ($\times 2$) \\
+\texttt{dog.jpg}        & 3  & bicycle, dog, truck \\
+\texttt{dog2.jpg}       & 7  & dog, person ($\times 4$), bicycle, umbrella \\
+\texttt{eagle.jpg}      & 1  & bird \\
+\texttt{food.jpg}       & 18 & bowl ($\times 10$), spoon ($\times 5$), diningtable, fork \\
+\texttt{giraffe.jpg}    & 2  & giraffe, zebra \\
+\texttt{horses.jpg}     & 4  & horse ($\times 4$) \\
+\texttt{motorbike.jpg}  & 2  & motorbike, person \\
+\texttt{person.jpg}     & 3  & person, dog, horse \\
+\texttt{surf.jpg}       & 2  & person, surfboard \\
+\texttt{wine.jpg}       & 4  & wine glass, bottle, chair ($\times 2$) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.48\linewidth}
+  \includegraphics[width=\linewidth]{resultados/padrao/dog.jpg}
+  \caption{\texttt{dog.jpg}: 3 objetos.}
+\end{subfigure}\hfill
+\begin{subfigure}{0.48\linewidth}
+  \includegraphics[width=\linewidth]{resultados/padrao/horses.jpg}
+  \caption{\texttt{horses.jpg}: 4 cavalos.}
+\end{subfigure}
+
+\vspace{0.5em}
+
+\begin{subfigure}{0.48\linewidth}
+  \includegraphics[width=\linewidth]{resultados/padrao/eagle.jpg}
+  \caption{\texttt{eagle.jpg}: 1 bird.}
+\end{subfigure}\hfill
+\begin{subfigure}{0.48\linewidth}
+  \includegraphics[width=\linewidth]{resultados/padrao/giraffe.jpg}
+  \caption{\texttt{giraffe.jpg}: girafa e zebra.}
+\end{subfigure}
+
+\vspace{0.5em}
+
+\begin{subfigure}{0.48\linewidth}
+  \includegraphics[width=\linewidth]{resultados/padrao/city_scene.jpg}
+  \caption{\texttt{city\_scene.jpg}: 15 objetos.}
+\end{subfigure}\hfill
+\begin{subfigure}{0.48\linewidth}
+  \includegraphics[width=\linewidth]{resultados/padrao/food.jpg}
+  \caption{\texttt{food.jpg}: 18 objetos.}
+\end{subfigure}
+
+\caption{Exemplos de detecção com os limiares padrão.}
+\label{fig:exemplos}
+\end{figure}
+
+\subsection{Variação dos limiares}
+
+Para investigar o efeito dos limiares de pós-processamento (item 3 do enunciado), repetimos a inferência sobre \texttt{horses.jpg} variando o limiar de IoU enquanto mantínhamos $s_{\min} = 0{,}5$. A Tabela~\ref{tab:iou_horses} mostra o número de caixas mantidas em cada cenário, e a Figura~\ref{fig:grade_iou} apresenta a comparação visual.
+
+\begin{table}[H]
+\centering
+\caption{Efeito do limiar de IoU em \texttt{horses.jpg} ($s_{\min}=0{,}5$).}
+\label{tab:iou_horses}
+\begin{tabular}{cc l}
+\toprule
+$\tau_{\mathrm{IoU}}$ & Caixas mantidas & Comentário \\
+\midrule
+0{,}10 & 3  & supressão excessiva, um cavalo é eliminado \\
+0{,}30 & 3  & ainda agressivo \\
+0{,}45 & 4  & valor padrão; resultado correto \\
+0{,}60 & 4  & resultado igual a 0{,}45 \\
+0{,}90 & 13 & duplicatas em quase todos os cavalos \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{resultados/grade_iou_horses.jpg}
+\caption{Variação do limiar de IoU sobre \texttt{horses.jpg}. Limiares baixos suprimem caixas verdadeiras de objetos próximos; limiares altos preservam duplicatas.}
+\label{fig:grade_iou}
+\end{figure}
+
+Em paralelo, fixamos $\tau_{\mathrm{IoU}} = 0{,}45$ e variamos o limiar de \emph{score} sobre a mesma imagem (Tabela~\ref{tab:score_horses}). Como os quatro cavalos são detectados com confiança alta (todas acima de 0{,}88), o número de detecções permanece estável até $s_{\min}=0{,}80$.
+
+\begin{table}[H]
+\centering
+\caption{Efeito do limiar de \emph{score} em \texttt{horses.jpg} ($\tau_{\mathrm{IoU}}=0{,}45$).}
+\label{tab:score_horses}
+\begin{tabular}{cc}
+\toprule
+$s_{\min}$ & Caixas mantidas \\
+\midrule
+0{,}20 & 4 \\
+0{,}40 & 4 \\
+0{,}60 & 4 \\
+0{,}80 & 4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{Discussão}
+% =====================================================================
+
+Os resultados confirmam que o YOLOv3 produz detecções de boa qualidade na maior parte das imagens, com alta confiança nos objetos principais. Em \texttt{dog.jpg}, por exemplo, as três classes esperadas (cachorro, bicicleta e caminhão) são identificadas com \emph{scores} de 0{,}99, 1{,}00 e 0{,}92, respectivamente, em concordância com a figura de referência do enunciado. O mesmo acontece em \texttt{cat.jpg}, \texttt{eagle.jpg} e \texttt{horses.jpg}, em que as classes pertencem a categorias bem representadas no COCO.
+
+Em cenas mais complexas, surgem comportamentos esperados e também algumas falhas. Em \texttt{city\_scene.jpg}, o detector recupera 15 objetos, com pessoas, carros, semáforos e caminhões. Já em \texttt{giraffe.jpg}, observa-se uma confusão sistemática: o flanco listrado de uma das girafas é classificado como zebra com confiança 0{,}97. Esse tipo de erro, embora chamativo, é coerente com a forma como redes treinadas no COCO aprendem texturas e silhuetas, e ilustra o limite do que se consegue obter sem treinamento adicional sobre dados específicos do domínio. Em \texttt{dog2.jpg}, o detector encontra um guarda-chuva onde, na verdade, há um objeto similar mas distinto, possivelmente por viés de cena.
+
+\subsection{Papel dos limiares}
+
+A análise da Tabela~\ref{tab:iou_horses} torna explícito o \emph{trade-off} associado ao limiar de IoU. Quando $\tau$ é muito baixo (0{,}10), a NMS é agressiva: como dois cavalos lado a lado podem ter caixas com sobreposição não negligenciável, parte deles é descartada. Quando $\tau$ é muito alto (0{,}90), a NMS deixa de cumprir seu papel: as duplicatas geradas pelas três escalas e por âncoras vizinhas não são suprimidas e o número de caixas explode para 13. O valor $\tau = 0{,}45$, padrão na literatura, corresponde a um equilíbrio adequado para esta cena.
+
+O limiar de \emph{score}, por sua vez, atua antes da NMS, como um filtro grosseiro de confiança. Em cenas em que os objetos têm alta confiança (caso de \texttt{horses.jpg}), seu efeito é pequeno; em cenas com objetos pequenos ou atípicos, valores mais permissivos podem aumentar a cobertura, mas trazem mais falsos positivos. Em produção, ambos os limiares costumam ser ajustados em conjunto sobre uma base de validação, em função das exigências de precisão e revocação da aplicação.
+
+\subsection{Limitações e melhorias possíveis}
+
+A principal limitação do nosso pipeline é, por construção, o uso de pesos treinados sobre o COCO e nunca refinados. Isso restringe as classes detectáveis às 80 categorias originais e penaliza imagens cujas distribuições difiram daquela base. Algumas direções naturais de melhoria são:
+
+\begin{itemize}\itemsep0pt
+  \item Migrar para versões mais recentes da família YOLO (v5, v7, v8), que incorporam técnicas como \emph{mosaic augmentation}, ancoras adaptativas, perdas baseadas em CIoU e cabeças desacopladas \cite{bochkovskiy2020yolov4,jocher2020yolov5}, e tendem a entregar precisão superior com latência semelhante.
+  \item Substituir o NMS clássico pelo \emph{Soft-NMS} \cite{bodla2017softnms}, que reduz o \emph{score} das caixas sobrepostas em vez de eliminá-las abruptamente, atenuando o problema observado em $\tau$ baixo.
+  \item Realizar \emph{fine-tuning} sobre dados específicos do domínio quando a aplicação exigir classes ausentes do COCO.
+  \item Incluir uma etapa de validação automática (cálculo de \emph{mAP} contra uma base de teste anotada) para medir, e não apenas inspecionar visualmente, o impacto de cada escolha.
+\end{itemize}
+
+% =====================================================================
+% Referencias
+% =====================================================================
+
+\begin{thebibliography}{99}
+
+\bibitem{redmon2016yolo}
+Redmon, J., Divvala, S., Girshick, R., Farhadi, A. \emph{You Only Look Once: Unified, Real-Time Object Detection}. CVPR, 2016.
+
+\bibitem{redmon2017yolov2}
+Redmon, J., Farhadi, A. \emph{YOLO9000: Better, Faster, Stronger}. CVPR, 2017.
+
+\bibitem{redmon2018yolov3}
+Redmon, J., Farhadi, A. \emph{YOLOv3: An Incremental Improvement}. arXiv:1804.02767, 2018.
+
+\bibitem{bochkovskiy2020yolov4}
+Bochkovskiy, A., Wang, C.-Y., Liao, H.-Y. M. \emph{YOLOv4: Optimal Speed and Accuracy of Object Detection}. arXiv:2004.10934, 2020.
+
+\bibitem{jocher2020yolov5}
+Jocher, G. et al. \emph{YOLOv5}. Repositório oficial: \url{https://github.com/ultralytics/yolov5}, 2020.
+
+\bibitem{lin2017fpn}
+Lin, T.-Y., Dollár, P., Girshick, R., He, K., Hariharan, B., Belongie, S. \emph{Feature Pyramid Networks for Object Detection}. CVPR, 2017.
+
+\bibitem{he2016resnet}
+He, K., Zhang, X., Ren, S., Sun, J. \emph{Deep Residual Learning for Image Recognition}. CVPR, 2016.
+
+\bibitem{lin2014coco}
+Lin, T.-Y. et al. \emph{Microsoft COCO: Common Objects in Context}. ECCV, 2014.
+
+\bibitem{girshick2014rcnn}
+Girshick, R., Donahue, J., Darrell, T., Malik, J. \emph{Rich feature hierarchies for accurate object detection and semantic segmentation}. CVPR, 2014.
+
+\bibitem{ren2015fasterrcnn}
+Ren, S., He, K., Girshick, R., Sun, J. \emph{Faster R-CNN: Towards Real-Time Object Detection with Region Proposal Networks}. NIPS, 2015.
+
+\bibitem{liu2016ssd}
+Liu, W. et al. \emph{SSD: Single Shot MultiBox Detector}. ECCV, 2016.
+
+\bibitem{carion2020detr}
+Carion, N. et al. \emph{End-to-End Object Detection with Transformers}. ECCV, 2020.
+
+\bibitem{bodla2017softnms}
+Bodla, N., Singh, B., Chellappa, R., Davis, L. S. \emph{Soft-NMS: Improving Object Detection With One Line of Code}. ICCV, 2017.
+
+\bibitem{zou2023survey}
+Zou, Z., Chen, K., Shi, Z., Guo, Y., Ye, J. \emph{Object Detection in 20 Years: A Survey}. Proceedings of the IEEE, 111(3), 257-276, 2023.
+
+\bibitem{paszke2019pytorch}
+Paszke, A. et al. \emph{PyTorch: An Imperative Style, High-Performance Deep Learning Library}. NeurIPS, 2019.
+
+\end{thebibliography}
+
+\end{document}
